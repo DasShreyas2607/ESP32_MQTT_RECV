@@ -23,27 +23,60 @@
 #include "mqtt_client.h"
 #include "driver/gpio.h"
 
+#include "tm1637.h"
+
 #define WIFI_SSID "Note 12"
 #define WIFI_PASS "Olymp1ad"
 #define BLINK_GPIO GPIO_NUM_2
 
-#define MQTT_URL "mqtt://192.168.254.177:1883"
+#define MQTT_URL "mqtt://pi:pass@192.168.254.177:1883"
 #define MQTT_TOPIC "mqtt/parking/display"
+
+#define LOOP false
+
+// Choose bw 0 - 34
+const gpio_num_t ROW_1[2] = {16, 17};
 
 static EventGroupHandle_t wifi_event_group;
 const int CONNECTED_BIT = BIT0;
 
-static uint8_t s_led_state = 0;
+static uint8_t s_led_state = true;
 
 struct Payload
 {
     int bay_no;
-    int isParked[6];
+    int isParked[9];
     time_t timeStamp;
 };
 struct Payload msg;
 
 static const char *TAG = "MQTT_SUBS";
+tm1637_led_t *lcd;
+
+void led_driver()
+{
+    do
+    {
+        #if (LOOP==true) 
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        #endif
+        ESP_LOGI(TAG, " ==================> Start %d <==================\n", s_led_state);
+        for (int i = 0; i < 3; i++)
+        {
+            ESP_LOGI(TAG, "%d\t%d\t%d\t%d\n", msg.bay_no + i, msg.isParked[i * 2] ? msg.isParked[i * 2] : 0, msg.isParked[i * 2 + 1] ? msg.isParked[i * 2 + 1] : 0, msg.isParked[i * 2 + 2] ? msg.isParked[i * 2 + 2] : 0);
+        }
+        ESP_LOGI(TAG, " ===================> END %d <===================\n", s_led_state);
+
+        int i = 0;
+        tm1637_set_segment_number(lcd, 0, msg.bay_no + i, false);
+        gpio_set_level(BLINK_GPIO, s_led_state);
+        s_led_state = !s_led_state;
+        for (int j = 1; j < 4; j++) {
+            tm1637_set_segment_number(lcd, j, msg.isParked[i * 2 + j - 1] ? msg.isParked[i * 2 + j - 1] : 16, false);
+        }
+
+    } while (LOOP);
+}
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -82,8 +115,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
         memcpy(&msg, event->data, event->data_len);
-        gpio_set_level(BLINK_GPIO, s_led_state);
-        s_led_state = !s_led_state;
+        #if (LOOP==false) 
+        led_driver(); 
+        #endif
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -105,6 +139,7 @@ static void mqtt_init(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = MQTT_URL,
+        
     };
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, mqtt_event_handler, NULL);
@@ -188,22 +223,6 @@ void wifi_init()
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-void led_driver()
-{
-    int i = 0;
-    for (;;)
-    {
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        ESP_LOGI(TAG, " ==================> Start <==================\n");
-        for (int i = 0; i < 3; i++)
-        {
-            ESP_LOGI(TAG, "%d", msg.bay_no + 1);
-            ESP_LOGI(TAG, "\t%d\t%d\n", msg.isParked[i * 2] ? msg.isParked[i * 2] : 0, msg.isParked[i * 2 + 1] ? msg.isParked[i * 2 + 1] : 0);
-        }
-        ESP_LOGI(TAG, " ===================> END <===================\n");
-    }
-}
-
 void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -219,7 +238,11 @@ void app_main(void)
     gpio_reset_pin(BLINK_GPIO);
     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
 
+    lcd = tm1637_init(ROW_1[0], ROW_1[1]);
+
     wifi_init();
+    #if (LOOP==true) 
     xTaskCreate(&led_driver, "led_driver", 9216, NULL, 5, NULL);
+    #endif
     return;
 }
