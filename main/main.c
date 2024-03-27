@@ -29,13 +29,15 @@
 #define WIFI_PASS "Olymp1ad"
 #define BLINK_GPIO GPIO_NUM_2
 
-#define MQTT_URL "mqtt://pi:pass@192.168.254.177:1883"
+#define MQTT_URL "mqtt://pi:pass@192.168.150.177:1883"
 #define MQTT_TOPIC "mqtt/parking/display"
 
 #define LOOP false
 
 // Choose bw 0 - 34
-const gpio_num_t ROW_1[2] = {16, 17};
+const gpio_num_t ROW_1[2] = {22, 23};
+const gpio_num_t ROW_2[2] = {19, 21};
+const gpio_num_t ROW_3[2] = {5, 18};
 
 static EventGroupHandle_t wifi_event_group;
 const int CONNECTED_BIT = BIT0;
@@ -51,7 +53,7 @@ struct Payload
 struct Payload msg;
 
 static const char *TAG = "MQTT_SUBS";
-tm1637_led_t *lcd;
+tm1637_led_t *lcd[3];
 
 void led_driver()
 {
@@ -67,12 +69,14 @@ void led_driver()
         }
         ESP_LOGI(TAG, " ===================> END %d <===================\n", s_led_state);
 
-        int i = 0;
-        tm1637_set_segment_number(lcd, 0, msg.bay_no + i, false);
         gpio_set_level(BLINK_GPIO, s_led_state);
         s_led_state = !s_led_state;
-        for (int j = 1; j < 4; j++) {
-            tm1637_set_segment_number(lcd, j, msg.isParked[i * 2 + j - 1] ? msg.isParked[i * 2 + j - 1] : 16, false);
+
+        for (int i = 0; i < 3; i++) {
+            tm1637_set_segment_number(lcd[i], 0, msg.bay_no + i, false);
+            for (int j = 1; j < 4; j++) {
+                tm1637_set_segment_number(lcd[i], j, msg.isParked[i * 2 + j - 1] ? msg.isParked[i * 2 + j - 1] : 16, false);
+            }
         }
 
     } while (LOOP);
@@ -238,7 +242,10 @@ void app_main(void)
     gpio_reset_pin(BLINK_GPIO);
     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
 
-    lcd = tm1637_init(ROW_1[0], ROW_1[1]);
+    
+    lcd[0] = tm1637_init(ROW_1[0], ROW_1[1]);
+    lcd[1] = tm1637_init(ROW_2[0], ROW_2[1]);
+    lcd[2] = tm1637_init(ROW_3[0], ROW_3[1]);
 
     wifi_init();
     #if (LOOP==true) 
